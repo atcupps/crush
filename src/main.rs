@@ -1,58 +1,97 @@
-use eframe::egui::{self, FontDefinitions, FontFamily, FontId, Style, TextStyle};
+use std::io;
 
-struct MyApp {
-    input_text: String,
-    output_text: String,
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use ratatui::{buffer::Buffer, layout::Rect, style::{Style, Stylize}, symbols::border, text::{Line, Span, Text}, widgets::{Block, Paragraph, Widget}, DefaultTerminal, Frame};
+
+pub struct App {
+    counter: u8,
+    exit: bool,
 }
 
-impl MyApp {
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let mut fonts = FontDefinitions::default();
-        
-        // Ensure egui's built-in monospace font is added
-        fonts.families.entry(FontFamily::Monospace).or_default().push("Hack".to_owned()); // Default monospace font
-
-        cc.egui_ctx.set_fonts(fonts);
-
-        // Set up text styles
-        let mut style: Style = (*cc.egui_ctx.style()).clone();
-        style.text_styles.insert(
-            TextStyle::Body,
-            FontId::new(16.0, FontFamily::Monospace),
-        );
-        cc.egui_ctx.set_style(style);
-
-        Self {
-            input_text: String::new(),
-            output_text: String::new(),
+impl Default for App {
+    fn default() -> Self {
+        App {
+            counter: 0,
+            exit: false
         }
     }
 }
 
-impl eframe::App for MyApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.label("Enter some text:");
-            let response = ui.text_edit_singleline(&mut self.input_text);
+impl App {
+    pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
+        while !self.exit {
+            terminal.draw(|frame| self.draw(frame))?;
+            self.handle_events()?;
+        }
 
-            if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                self.output_text = self.input_text.clone();
-                self.input_text.clear();
-            }
+        Ok(())
+    }
 
-            ui.separator();
-            ui.label("You entered:");
-            ui.monospace(&self.output_text);
-        });
+    fn draw(&self, frame: &mut Frame) {
+        frame.render_widget(self, frame.area());
+    }
+
+    fn handle_events(&mut self) -> io::Result<()> {
+        match event::read()? {
+            Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
+                self.handle_key_event(key_event)
+            },
+            _ => { }
+        };
+        Ok(())
+    }
+
+    fn handle_key_event(&mut self, key_event: KeyEvent) {
+        match key_event.code {
+            KeyCode::Char('q') => { self.exit = true },
+            KeyCode::Left => {
+                self.counter = self.counter.saturating_sub(1)
+            },
+            KeyCode::Right => {
+                self.counter = self.counter.saturating_add(1)
+            },
+            _ => { }
+        };
     }
 }
 
-fn main() {
-    let options = eframe::NativeOptions::default();
-    eframe::run_native(
-        "Echo App",
-        options,
-        Box::new(|cc| Ok(Box::new(MyApp::new(cc)))),
-    )
-    .unwrap();
+impl Widget for &App {
+    fn render(self, area: Rect, buf: &mut Buffer) where Self: Sized {
+        let title = Line::from(vec![
+            Span::styled(" Counter App ", Style::new().bold())
+        ]);
+
+        let keys_style = Style::new().blue().bold();
+        let instructions = Line::from(vec![
+            Span::raw(" Decrement "),
+            Span::styled("<Left>", keys_style),
+            Span::raw("  Increment "),
+            Span::styled("<Right>", keys_style),
+            Span::raw("  Quit "),
+            Span::styled("<q> ", keys_style),
+        ]);
+
+        let block = Block::bordered()
+            .title(title.centered())
+            .title_bottom(instructions.centered())
+            .border_set(border::DOUBLE);
+
+        let counter_text = Text::from(vec![Line::from(vec![
+            Span::raw("Value: "),
+            Span::raw(format!("{}", self.counter)),
+        ])]);
+
+        Paragraph::new(counter_text)
+            .centered()
+            .block(block)
+            .render(area, buf);
+    }
+}
+
+fn main() -> io::Result<()> {
+    let mut terminal = ratatui::init();
+    let app_result = App::default().run(&mut terminal);
+
+    ratatui::restore();
+    app_result
 }
